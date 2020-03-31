@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+###############################################################################################################
+# Source of this script is https://github.com/nebiolabs/methylation_tools/blob/master/downsample_methylKit.py #
+###############################################################################################################
+
 import argparse
 import sys
 import random
