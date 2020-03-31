@@ -20,7 +20,7 @@ attr = {**reps_attr, **samples_attr}
 
 prep_sample_lab_cov = [x + '_' + y for x in reps_attr.keys() for y in covgs1] + [x + '_' + y for x in samples_attr.keys() for y in covgs2]
 
-sample_lab_cov = ['_'.join([y[1], y[2], y[3]]) for y in [x.split('_') for x in prep_sample_lab_cov]]
+sample_lab_cov = list(set(['_'.join([y[1], y[2], y[3]]) for y in [x.split('_') for x in prep_sample_lab_cov]]))
 
 rule all:
 	input:
