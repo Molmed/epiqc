@@ -1,0 +1,37 @@
+{
+	"__default__":
+	{
+		"A": "snic2017-7-344",
+		"t": "12:00:00",
+		"p": "core",
+		"n": "1",
+		"qos": "normal"
+	},
+	"determine_coverage":
+	{
+		"t": "00:14:00",
+		"p": "core",
+		"n": "2",
+		"qos": "short"
+	},
+	"determine_coverage_post":
+	{
+		"t": "00:14:00",
+		"p": "core",
+		"n": "2",
+		"qos": "short"
+	},
+	"cumulative_coverage":
+	{
+		"t": "00:14:00",
+		"p": "core",
+		"n": "2",
+		"qos": "short"
+	},
+	"downsample_bedgraph":
+	{
+		"t": "12:00:00",
+		"p": "core",
+		"n": "1"
+	}
+}
