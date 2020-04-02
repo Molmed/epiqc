@@ -16,8 +16,8 @@ ds <- sapply(strsplit(bn, '[_.]'), function(x) x[5] )
 dd <- fread(file_in, skip='chr')
 
 if (nrow(dd) > 0) {
-	dd[,cov:=(V5+V6)/2]
-	brk <- c(0.5, 1, 2, 5, 10, 15, 20, 25, 30, 50, 100, Inf)
+	dd[,cov:=(V5+V6)]
+	brk <- c(1, 2, 5, 10, 20, 30, 40, 50, 100, 200, Inf)
 	dd[, bins:=cut(cov, brk, right=F, ordered_result=T)]
 
 	foo <- dd[,.(count=.N), by=bins]

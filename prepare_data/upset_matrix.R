@@ -17,12 +17,12 @@ for (i in 1:nsamp) {
 	fn <- beds[i]
 	print(fn)
 	tmp <- fread(fn, skip='chr')
-	gr <- GRanges(seqnames=tmp$V1, ranges=IRanges(start=tmp$V2 + 1, end=tmp$V3))
+	gr <- GRanges(seqnames=tmp$V1, ranges=IRanges(start=tmp$V2, end=tmp$V3))
 	print('made granges')
 	hits <- findOverlaps(probe_coords, gr, ignore.strand=T)
 	print('found hits')
 	tmp <- tmp[subjectHits(hits)]
-	cc <- (tmp$V5 + tmp$V6)/2
+	cc <- tmp$V5 + tmp$V6
 	rm(gr, tmp)
 	gc()
 

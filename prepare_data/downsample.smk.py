@@ -1,7 +1,7 @@
 import os.path, glob
 
-covgs1 = ['5', '10', '15', '20', '25']
-covgs2 = ['5', '10', '15', '20', '25', '50', '80', '100', '140']
+covgs1 = ['5', '10', '20', '30', '40', '50']
+covgs2 = ['5', '10', '20', '30', '40', '50', '100', '150', '200']
 
 bed_dir = 'combined/'
 
@@ -36,7 +36,7 @@ rule determine_coverage:
 	input:
 		lambda wildcards: attr[wildcards.sample_key]
 	output:
-		'total_coverage/{sample_key}_total_coverage.txt'
+		temp('total_coverage/{sample_key}_total_coverage.txt')
 	shell:
 		"""
 		module load R
@@ -111,7 +111,7 @@ rule determine_coverage_post:
 	input:
 		'downsampled/downsampled_{prep}_{sample}_{lab}_{cov}x.cov.gz'
 	output:
-		'total_coverage/{prep}_{sample}_{lab}_{cov}_total_coverage.txt'
+		temp('total_coverage/{prep}_{sample}_{lab}_{cov}_total_coverage.txt')
 	shell:
 		"""
 		module load R
@@ -134,7 +134,7 @@ rule cumulative_coverage:
 	input:
 		'downsampled/downsampled_{prep}_{sample}_{lab}_{cov}x.cov.gz'
 	output:
-		'cumulative_coverage/{prep}_{sample}_{lab}_{cov}x_cumulative_coverage.txt'
+		temp('cumulative_coverage/{prep}_{sample}_{lab}_{cov}x_cumulative_coverage.txt')
 	shell:
 		"""
 		module load R

@@ -15,7 +15,7 @@ dd <- fread(file_in, skip='chr')
 
 
 if (nrow(dd) > 0) {
-	tot_cov <- data.table(prep=tech, sample=sml, lab=lab, totc=dd[,sum(V5+V6)], avgx=dd[,mean((V5+V6)/2, na.rm=T)], minc=dd[,min((V5+V6), na.rm=T)], source=bn)
+	tot_cov <- data.table(prep=tech, sample=sml, lab=lab, totc=dd[,sum(V5+V6)], avg_cov=dd[,mean(V5+V6, na.rm=T)], med_cov=dd[,median((V5+V6), na.rm=T)], source=bn)
 	write.table(tot_cov, file=file_out, sep='\t', quote=F, row.names=F, col.names=F)
 } else {
 	system(paste('touch', file_out))
