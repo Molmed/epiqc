@@ -109,6 +109,6 @@ Coverage after downsampling is:
 prep	sample	lab	total_cs	avg_coverage		median_cov	source_file
 SPLAT   HG006   LAB01   561533250       20.0867190507296        20      downsampled_SPLAT_HG006_LAB01_20x.cov.gz
 
-I think that downsampling to a target of total number of cytosines counted instead of an average coverage target 
+Downsampling to a target of total number of cytosines counted instead of an average coverage target 
 would perhaps be more precise and more eqvivalent to having the same number of reads in different samples compared, 
 but it might not sound so good in writing to say downsampling was done to a count of 561533250 cytosines?
