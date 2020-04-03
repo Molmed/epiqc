@@ -1,0 +1,114 @@
+Merging strands, replicates and downsampling.
+Example merge using SPLAT_HG006_LAB01_REP02.bedGraph.gz and SPLAT_HG006_LAB01_REP01.bedGraph.gz
+Small scripts are tied together with two snakemake scipts:
+merge_bedgraph.smk.py and downsample.smk.py
+
+runit1_merge_strands_and_reps.sh and runit2_downsample.sh starts scripts on rackham using slurm.
+
+
+Script: cg_coords.R
+
+Find all CG-sites in chromosomes 1-22, X, Y and M in hg38 to make a list of 2bp intervals
+[1] "Number of cg sites in reference chrs 1-22, X, Y, M: 29401795"
+
+Script: strand_merge.R
+
+Load bedgraph file from amazon bucket
+[1] "Strandmerging ../new_bedgraph/SPLAT_HG006_LAB01_REP02.bedGraph.gz"
+
+The number of cytosine positions in bedgraph:
+[1] "Number of Cs assayed in bedgraph: 55738628"
+
+and cytosine positions in bedgraph in chrs 1-22, X ,Y and M:
+[1] "Number of Cs assayed in bedgraph chr1-22,X,Y,M: 55552635"
+
+The number of 2bp reference CG intervals that intersects bedgraph data is:
+[1] "Number of reference cg sites covered by bedgraph data: 28002937"
+
+The number of bedgraph cytosine positions intersecting reference CG intervals is:
+[1] "Number of bedgraph Cs intersecting reference cg sites: 55552635"
+This is all positions in bedgraph in chrs 1-22, X, Y and M
+
+reference CG intervals are intersected with bedgraph data and for each CG interval
+methylated and unmethylated counts are summed.
+This gives a total of:
+[1] "Methylated Cs: 534678012 , unmethylated Cs: 268510206"
+In file strandmerged_SPLAT_HG006_LAB01_REP02.cov.gz
+[1] "Wrote strandmerged file with 28002937 cg sites"
+
+
+Load bedgraph file from amazon bucket
+[1] "Strandmerging ../new_bedgraph/SPLAT_HG006_LAB01_REP01.bedGraph.gz"
+
+The number of cytosine positions in bedgraph:
+[1] "Number of Cs assayed in bedgraph: 55484162"
+
+and cytosine positions in bedgraph in chrs 1-22, X ,Y and M:
+[1] "Number of Cs assayed in bedgraph chr1-22,X,Y,M: 55300443"
+
+The number of 2bp reference CG intervals that intersects bedgraph data is:
+[1] "Number of reference cg sites covered by bedgraph data: 27958998"
+
+The number of bedgraph cytosine positions intersecting reference CG intervals is:
+[1] "Number of bedgraph Cs intersecting reference cg sites: 55300443"
+This is all positions in bedgraph in chrs 1-22, X, Y and M
+
+reference CG intervals are intersected with bedgraph data and for each CG interval
+methylated and unmethylated counts are summed.
+This gives a total of:
+[1] "Methylated Cs: 378843524 , unmethylated Cs: 189915951"
+In file strandmerged_SPLAT_HG006_LAB01_REP01.cov.gz
+[1] "Wrote strandmerged file with 27958998 cg sites"
+
+
+Script: combine_reps.R
+
+[1] "Merging replicate strandmerged files:
+combined/strandmerged_SPLAT_HG006_LAB01_REP01.cov.gz
+combined/strandmerged_SPLAT_HG006_LAB01_REP02.cov.gz"
+
+Load replicate strandmerged files:
+
+[1] "reading combined/strandmerged_SPLAT_HG006_LAB01_REP01.cov.gz"
+[1] "Number of sites: 27958998"
+[1] "Meth Cs: 378843524 , unmeth Cs: 189915951"
+
+[1] "reading combined/strandmerged_SPLAT_HG006_LAB01_REP02.cov.gz"
+[1] "Number of sites: 28002937"
+[1] "Meth Cs: 534678012 , unmeth Cs: 268510206"
+
+Merge the two files on keys chromosome CG site start and end coordinate.
+[1] "Number of merged sites: 28077683"
+Do rowsums on matched methylated and unmethylated counts of the two files:
+Merged counts are:
+[1] "Meth Cs: 913521536 , unmeth Cs: 458426157"
+
+Write replicate merged file
+[1] "Wrote replicate merged file: combined/repsCombined_SPLAT_HG006_LAB01.cov.gz"
+
+
+Script: file_coverage.R
+Compute coverage of replicate merged file.
+Coverage is:
+prep	sample	lab	total_cs	avg_coverage		median_cov	source_file
+SPLAT   HG006   LAB01   1371947693      48.8625679334011        48      repsCombined_SPLAT_HG006_LAB01.cov.gz
+
+
+Downsample file to average coverage 20:
+
+Computing downsample fraction for NEB downsample script is done in the snakemake script downsample.smk.py
+in function get_coverage2
+
+20 / 48.8625679334011 = 0.40931 (rounded to 5 decimals, decide on precision?)
+
+Script: downsample_methylKit.py
+
+NEB downsample script is run with --fraction 0.40931 on file repsCombined_SPLAT_HG006_LAB01.cov.gz and writes downsampled_SPLAT_HG006_LAB01_20x.cov.gz
+
+Coverage after downsampling is:
+prep	sample	lab	total_cs	avg_coverage		median_cov	source_file
+SPLAT   HG006   LAB01   561533250       20.0867190507296        20      downsampled_SPLAT_HG006_LAB01_20x.cov.gz
+
+I think that downsampling to a target of total number of cytosines counted instead of an average coverage target 
+would perhaps be more precise and more eqvivalent to having the same number of reads in different samples compared, 
+but it might not sound so good in writing to say downsampling was done to a count of 561533250 cytosines?
