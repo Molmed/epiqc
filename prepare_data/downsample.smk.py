@@ -1,4 +1,4 @@
-import os.path, glob
+import os.path, glob, decimal
 
 covgs1 = ['5', '10', '20', '30', '40', '50']
 covgs2 = ['5', '10', '20', '30', '40', '50', '100', '150', '200']
@@ -54,6 +54,7 @@ rule cat_coverage_table:
 		"""
 
 def get_coverage1(wildcards, cov_file):
+	decimal.getcontext().prec = 8
 	covs = []
 	sample_coverage = None
 	for line in open(cov_file, 'r'):
@@ -67,10 +68,11 @@ def get_coverage1(wildcards, cov_file):
 				sample_coverage = coverage
 
 	min_cov = min(covs)
-	fraction = round(float(min_cov)/float(sample_coverage), 5)
+	fraction = str(decimal.Decimal(min_cov)/decimal.Decimal(sample_coverage))
 	return(fraction)
 
 def get_coverage2(wildcards, cov_file):
+	decimal.getcontext().prec = 8
 	print(wildcards)
 	print(cov_file)
 	sample_coverage = None
@@ -84,7 +86,7 @@ def get_coverage2(wildcards, cov_file):
 				print([sample, prep, lab])
 				break
 	print(sample_coverage)
-	fraction = round(float(wildcards.cov)/float(sample_coverage), 5)
+	fraction = str(decimal.Decimal(wildcards.cov)/decimal.Decimal(sample_coverage))
 	print(fraction)
 	return(fraction)
 
