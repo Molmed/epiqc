@@ -102,7 +102,7 @@ rule downsample_bedgraph:
 		'downsampled/downsampled_{prep}_{sample}_{lab}_{cov}x.cov.gz'
 
 	run:
-		if params.sample_fraction < 1:
+		if decimal.Decimal(params.sample_fraction) < decimal.Decimal('1'):
 			shell('zcat {input[0]} | python3 downsample_methylKit.py --fraction {params.sample_fraction} --bedGraph | gzip > {output}')
 		else:
 			shell('touch {output}')
