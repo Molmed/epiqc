@@ -5,7 +5,7 @@
 library(tidyr)
 library(ggplot2)
 
-#Set directors and grab downsampled coverage files (from Anders' XXXX script)
+#Set directors and grab downsampled coverage files (from file_coverage.R (see prepare_data)
 setwd("/Users/jessicanordlund/Dropbox/Research/EpiQC/")
 test.data <- read.csv("cov_200215_DS.txt", header= T, sep="\t") 
 
