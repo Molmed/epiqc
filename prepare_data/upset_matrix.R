@@ -26,7 +26,7 @@ for (i in 1:nsamp) {
 	rm(gr, tmp)
 	gc()
 
-	upset[queryHits(hits),i] <- as.integer(cc >= cov)
+	upset[queryHits(hits),i] <- as.integer(cc >= as.numeric(cov))
 }
 
 prep <- sapply(strsplit(basename(beds), '[_.]'), '[', 2)
