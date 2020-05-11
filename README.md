@@ -1,3 +1,4 @@
 # epiqc scripts
 
-Anders & Jessica's scripts for analysis and visualization of EPI-QC methylation data. 
+Scripts for data processing, analysis and visualization of EpiQC methylation data. 
+
