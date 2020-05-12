@@ -4,7 +4,11 @@ library(ggplot2)
 library(dplyr)
 library(reshape2)
 library(RColorBrewer)
+library(hexbin)
+library(tidyr)
+library(GGally)
 
+# COLORS #
 my.assay.cols <- c("MethylSeq" = "#377eb8", 
                    "TruSeq" = "#e41a1c",
                    "EMSeq" = "#4daf4a",
@@ -21,75 +25,58 @@ my.genome.cols <- c("HG001" = "#3aa142",
                     "HG006" = "#fb6a4a",
                     "HG007" = "#cb181d")
 
+# LOAD DATA & ORGANIZE IT #
 # FOR HG002, load the beta-values of all CpG sites >=10x coverage from down-sampled Bedgraph files to 20x. 
 dat <- read.table(gzfile("/Users/jessicanordlund/Downloads/EPIQC/beta_HG002_LAB01_10x.txt.gz"), 
                  header= TRUE, fill=TRUE)  
-count.cpgs.covered <- colSums(is.na(dat))
 
 indx <- grepl('EPIC', colnames(dat)) #Remove EPIC
 dat <- dat[, !indx]
 
 names(dat) <- c("TruSeq", "SPLAT", "EMSeq", "MethylSeq", "TrueMethyl") #Make clean names
-count.cpgs.covered <- colSums(!is.na(dat))
+count.cpgs.covered <- colSums(!is.na(dat)) #Count CPG sites with Beta-values
 
 
-#Randomly sample 1M CGs: otherwise it takes too long
-dat <- dat[sample(nrow(dat), 1000000), ]
+#Randomly sample 100k CGs: otherwise it takes too long
+dat <- dat[sample(nrow(dat), 100000), ]
 
 # format data for plotting
 dat$CG <- row.names(dat) #add CG row name as ID 
 tmp <- as_tibble(melt(dat, id="CG")) # Melt it 
 tmp.cols <- my.assay.cols[match(names(dat), names(my.assay.cols))] # fix color order for plots
   
-# Get data, calculate correlations
+# Reduce DF- something happened with MethylSeq and TrueMethyl (all NA--- checking on this now).
 df <- dat[,1:3]
-my.cor.p <- round(cor(df, use = "pairwise.complete.obs", method="pearson"), 2)
-my.cor.s <- round(cor(df, use = "pairwise.complete.obs", method="spearman"), 2)
 
-# ----------------------------------------------------#
-# PLOT THE SMOOTH SCATTER PLOTS- PANEL C
-# Build colors
-buylrd = c("#313695", "#4575B4", "#74ADD1", "#ABD9E9", "#E0F3F8", "#FFFFBF",
-           "#FEE090", "#FDAE61", "#F46D43", "#D73027", "#A50026") 
-myColRamp = colorRampPalette(c(buylrd))
-
-# Get all info organized
-combs <- combn(1:ncol(df), 2) 
-my.cor.p<- melt(my.cor.p)
-my.cor.s <- melt(my.cor.s)
-
-#Make the plot
-par(mfrow=c(2,2), mar=c(3,4,1,1), mgp=c(1.5, .5, 0))
-
-for(i in 1:ncol(combs)){
-  x.name <-names(df)[combs[1,i]]
-  y.name <- names(df)[combs[2,i]]
-  cor.text.nr <- which(my.cor.p$Var1 %in% x.name & my.cor.p$Var2 %in% y.name)
-  legend.text <- c(sprintf("r=%s",my.cor.p$value[cor.text.nr]), sprintf("p=%s",my.cor.s$value[cor.text.nr]))
-  
-  smoothScatter(x=df[,combs[1,i]], y=df[,combs[2,i]],
-                xlab=x.name,ylab=y.name,
-                colramp=myColRamp)
-  
-  legend("topleft", legend=legend.text, cex=0.9, bty="n", text.col="white")
-  }
-
-#-------------------------------------------------------------------------------#
+#RMSE function 
+RMSE = function(m, o){
+  sqrt(mean((m - o)^2, na.rm=T))
+}
 
 
+# GGversion
+p <- ggpairs(df, lower="blank", upper = "blank") 
+seq <- 1:ncol(df)
+  for (x in seq)
+    for (y in seq) 
+      if (y>x) 
+        p <- putPlot(p, ggplot(df, aes_string(x=names(df)[x],y=names(df)[y])) + 
+                       stat_density2d(aes(fill = ..density..^0.55), geom = "tile", contour = FALSE, n = 200) +
+                       scale_fill_viridis_c(option = "plasma"), y,x)
 
-#
-# PLOT the Beta-value distribution: Panel D
-tmp <- rename(tmp, Assay = variable)
-
-ggplot(tmp, aes(x=value, color=Assay))+
-  geom_density() +
-  scale_color_manual(values= tmp.cols, 
-                    labels = paste0(levels(tmp$Assay), " (", round(count.cpgs.covered/1000000, 1), ")"))+
-  xlab("beta-value") +
-  theme(legend.position="top", panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(), axis.line = element_line(colour = "black"))
-
-
-  
+for (x in seq) 
+  for (y in seq) 
+    if (x>y) {
+      rmse.test <- round(RMSE(df[,x],df[,y]), 3)
+      tmp.r <- round(cor(df[,x], df[,y], use = "pairwise.complete.obs", method="pearson"), 3)
+      tmp.p <- round(cor(df[,x], df[,y], use = "pairwise.complete.obs", method="spearman"), 3)
+      n.sites <- sum(complete.cases(df[,x],df[,y]))
+      p <- putPlot(p, ggplot(df, aes_string(x=names(df)[x],y=names(df)[y])) + 
+                     theme(panel.background = element_blank(), 
+                           axis.title = element_blank(),
+                           axis.text = element_blank(), 
+                           axis.ticks = element_blank()) +
+                     annotate("text", x=1, y=2,size =4, 
+                              label= sprintf("r= %s \np= %s \nrmse= %s \n%s CpGs",tmp.r, tmp.p, rmse.test, n.sites)), y,x)}
+p
 
