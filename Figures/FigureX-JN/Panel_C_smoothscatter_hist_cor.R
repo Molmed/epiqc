@@ -1,5 +1,5 @@
 #Panels C-D of the Assay comparison figure:
-
+library(data.table)
 library(ggplot2)
 library(dplyr)
 library(reshape2)
@@ -7,6 +7,12 @@ library(RColorBrewer)
 library(hexbin)
 library(tidyr)
 library(GGally)
+
+# FUNCTIONS #
+RMSE = function(m, o){
+  sqrt(mean((m - o)^2, na.rm=T))
+}
+
 
 # COLORS #
 my.assay.cols <- c("MethylSeq" = "#377eb8", 
@@ -25,58 +31,77 @@ my.genome.cols <- c("HG001" = "#3aa142",
                     "HG006" = "#fb6a4a",
                     "HG007" = "#cb181d")
 
+
 # LOAD DATA & ORGANIZE IT #
 # FOR HG002, load the beta-values of all CpG sites >=10x coverage from down-sampled Bedgraph files to 20x. 
-dat <- read.table(gzfile("/Users/jessicanordlund/Downloads/EPIQC/beta_HG002_LAB01_10x.txt.gz"), 
-                 header= TRUE, fill=TRUE)  
+my.dat <- fread('/Users/jessicanordlund/Downloads/EPIQC/10xDS/beta_HG002_LAB01_5x.txt.gz')
+my.dat <- as.data.frame(my.dat)
+indx <- grepl('EPIC', colnames(my.dat)) #Remove EPIC
+my.dat <- my.dat[, !indx]
+names(my.dat) <- c("TruSeq", "SPLAT", "EMSeq", "MethylSeq", "TrueMethyl") #Make clean names
 
-indx <- grepl('EPIC', colnames(dat)) #Remove EPIC
-dat <- dat[, !indx]
+# Calculate genome-wide correlations, RMSE and Pair-wise overlapping sites
+count.cpgs.covered <- colSums(!is.na(my.dat)) #COunt CPG sites 
+my.cor.p <- round(cor(my.dat, use = "pairwise.complete.obs", method="pearson"), 3)
+my.cor.s <- round(cor(my.dat, use = "pairwise.complete.obs", method="spearman"), 3)
 
-names(dat) <- c("TruSeq", "SPLAT", "EMSeq", "MethylSeq", "TrueMethyl") #Make clean names
-count.cpgs.covered <- colSums(!is.na(dat)) #Count CPG sites with Beta-values
+cor.p <- reshape2::melt(my.cor.p)
+cor.s <- reshape2::melt(my.cor.s)
 
+# Calc RMSE
+combs <- combn(1:ncol(my.dat), 2) 
+datalist = list()
 
-#Randomly sample 100k CGs: otherwise it takes too long
-dat <- dat[sample(nrow(dat), 100000), ]
-
-# format data for plotting
-dat$CG <- row.names(dat) #add CG row name as ID 
-tmp <- as_tibble(melt(dat, id="CG")) # Melt it 
-tmp.cols <- my.assay.cols[match(names(dat), names(my.assay.cols))] # fix color order for plots
-  
-# Reduce DF- something happened with MethylSeq and TrueMethyl (all NA--- checking on this now).
-df <- dat[,1:3]
-
-#RMSE function 
-RMSE = function(m, o){
-  sqrt(mean((m - o)^2, na.rm=T))
+for (i in 1:ncol(combs)) {
+  x <- combs[1,i]
+  y <- combs[2,i]
+  datalist[[i]] <- c(names(my.dat)[x], names(my.dat)[y], 
+                     round(RMSE(my.dat[,x],my.dat[,y]), 3),
+                     sum(!is.na(my.dat[,x] & my.dat[,y])))
 }
 
+rmse_data = as.data.frame(do.call(rbind, datalist))
+names(rmse_data) <- c("Lib1", "Lib2", "rmse", "nsites")
 
-# GGversion
+
+#Randomly sample some CGs to plot the histogram and smooth scatter: otherwise it takes too long
+df <- as.data.frame(my.dat[sample(nrow(my.dat), 10000), ])
+
+
+# Get colors:
+tmp.cols <- my.assay.cols[match(names(my.dat), names(my.assay.cols))] # fix color order for plots
+
+
+# PLOT
 p <- ggpairs(df, lower="blank", upper = "blank") 
 seq <- 1:ncol(df)
-  for (x in seq)
-    for (y in seq) 
-      if (y>x) 
-        p <- putPlot(p, ggplot(df, aes_string(x=names(df)[x],y=names(df)[y])) + 
-                       stat_density2d(aes(fill = ..density..^0.55), geom = "tile", contour = FALSE, n = 200) +
-                       scale_fill_viridis_c(option = "plasma"), y,x)
+for (x in seq)
+  for (y in seq) 
+    if (y>x) 
+      p <- putPlot(p, ggplot(df, aes_string(x=names(df)[x],y=names(df)[y])) + 
+                     stat_density2d(aes(fill = ..density..^0.55), geom = "tile", contour = FALSE, n = 200) +
+                     scale_fill_viridis_c(option = "plasma"), y,x)
 
 for (x in seq) 
   for (y in seq) 
     if (x>y) {
-      rmse.test <- round(RMSE(df[,x],df[,y]), 3)
-      tmp.r <- round(cor(df[,x], df[,y], use = "pairwise.complete.obs", method="pearson"), 3)
-      tmp.p <- round(cor(df[,x], df[,y], use = "pairwise.complete.obs", method="spearman"), 3)
-      n.sites <- sum(complete.cases(df[,x],df[,y]))
+      rmse.test <- as.character(rmse_data$rmse[rmse_data$Lib1 %in% names(df)[x] & rmse_data$Lib2 %in% names(df)[y] |
+                   rmse_data$Lib2 %in% names(df)[x] & rmse_data$Lib1 %in% names(df)[y]])
+      n.sites <- as.character(rmse_data$nsites[rmse_data$Lib1 %in% names(df)[x] & rmse_data$Lib2 %in% names(df)[y] |
+                  rmse_data$Lib2 %in% names(df)[x] & rmse_data$Lib1 %in% names(df)[y]])
+      tmp.p <- cor.p$value[cor.p$Var1 %in% names(df)[x] & cor.p$Var2 %in% names(df)[y]]
+      tmp.s <- cor.s$value[cor.s$Var1 %in% names(df)[x] & cor.s$Var2 %in% names(df)[y]]
+     
+        
       p <- putPlot(p, ggplot(df, aes_string(x=names(df)[x],y=names(df)[y])) + 
                      theme(panel.background = element_blank(), 
                            axis.title = element_blank(),
                            axis.text = element_blank(), 
                            axis.ticks = element_blank()) +
-                     annotate("text", x=1, y=2,size =4, 
-                              label= sprintf("r= %s \np= %s \nrmse= %s \n%s CpGs",tmp.r, tmp.p, rmse.test, n.sites)), y,x)}
+                     annotate("text", x=1, y=2,size =3, 
+                              label= sprintf("r= %s \np= %s \nrmse= %s \n%s CpGs",tmp.p, tmp.s, rmse.test, n.sites)), y,x)}
 p
+
+
+
 
