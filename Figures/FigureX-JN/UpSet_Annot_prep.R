@@ -5,6 +5,7 @@ library(data.table)
 library(dplyr)
 library(UpSetR)
 
+setwd('/proj/uppstore2017167/EPIQC/Homer_annotations')
 anot <- fread('/proj/uppstore2017167/EPIQC/upset_coords.bed.gz')
 
 dat.dir <- '/proj/uppstore2017167/EPIQC/Homer_annotations'
@@ -27,7 +28,7 @@ for (f in my.files) {
 
 # EMSeq
 my.emseq[, sums := rowSums(.SD)]
-fwrite(anot[with(my.emseq, sums >=3),], file="emseq_coords.bed", sep="\t", col.names=F)
+fwrite(anot[with(my.emseq, sums < 1),], file="emseq_coords_missed.bed", sep="\t", col.names=F)
 
 my.splat[, sums := rowSums(.SD)]
 fwrite(anot[with(my.splat, sums >=3),], file="splat_coords.bed", sep="\t",col.names=F)
