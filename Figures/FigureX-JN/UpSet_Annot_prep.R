@@ -7,7 +7,7 @@ library(UpSetR)
 
 setwd('/proj/uppstore2017167/EPIQC/Homer_annotations')
 anot <- fread('/proj/uppstore2017167/EPIQC/upset_coords.bed.gz')
-
+anot2 <- fread('/proj/uppstore2017167/EPIQC/cg_annotation/anot/CG_sites_100bp_anot_table.gz')
 dat.dir <- '/proj/uppstore2017167/EPIQC/Homer_annotations'
 my.files <- list.files(dat.dir, recursive=F, full.names= T, pattern= "LAB01_10x.txt.gz")
 
@@ -26,7 +26,18 @@ for (f in my.files) {
   my.splat <- cbind(my.splat, df %>% select(contains("SPLAT")))
 }
 
+#------------------------------------------------#
+# REMOVE X AND Y CHR
+#------------------------------------------------#
 
+my.emseq <- my.emseq[with(anot, !V1 %in% c("chrY", "chrX")) ,]
+my.methylseq <- my.methylseq[with(anot, !V1 %in% c("chrY", "chrX")) ,]
+my.truseq <- my.truseq[with(anot, !V1 %in% c("chrY", "chrX")) ,]
+my.truemethyl <- my.truemethyl[with(anot, !V1 %in% c("chrY", "chrX")) ,]
+my.splat <- my.splat[with(anot, !V1 %in% c("chrY", "chrX")) ,]
+
+anot2 <- anot2[with(anot, !V1 %in% c("chrY", "chrX")) ,]
+anot <- anot[with(anot, !V1 %in% c("chrY", "chrX")) ,]
 #------------------------------------------------#
 # UPSET PLOTS
 #------------------------------------------------#
@@ -131,6 +142,14 @@ fwrite(anot[with(my.truseq, sums >= 4),], file="truseq_coords_catched.bed", sep=
 #catched:12063788
 
 
+
+tmp <- anot2[with(my.truseq, sums < 1),]
+
+
+
+
+
+
 # NEW Upsets for: Never caught, usually caught and always caught
 merged.dat <- data.table(emseq = select(my.emseq, sums), 
            methylseq= select(my.methylseq, sums),
@@ -188,6 +207,7 @@ upset(dt.usually,
       sets.x.label = "N CpG sites", 
       text.scale = c(1.2, 1.2, 1.2, 1.2, 1.1, 0.7))
 dev.off()
+
 
 # Save annotations
 #1 always missed by TruSeq compared to caught by the others ! OBS THIS NOT DONE
