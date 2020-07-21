@@ -82,6 +82,15 @@ df$value <- as.numeric(df$value)
 df$variable <- factor(df$variable, levels=unique(df$variable))
 df$downsampled_cov <- factor(df$downsampled_cov, levels=unique(df$downsampled_cov))
 
+# Just getting some simple numbers for the manuscript text here
+summary(dat[dat$downsampled %in% "10x" & dat$coverage_interval %in% "[5,10)" ,8])
+summary(dat[dat$downsampled %in% "10x" & dat$coverage_interval %in% "[10,20)" ,8])
+summary(dat[dat$downsampled %in% "10x" & dat$coverage_interval %in% "[5,10)" & dat$prep %in% "EMSeq",8])
+summary(dat[dat$downsampled %in% "10x" & dat$coverage_interval %in% "[5,10)" & dat$prep %in% "TruSeq",8])
+
+summary(dat[dat$downsampled %in% "20x" & dat$coverage_interval %in% "[10,20)" ,8])
+summary(dat[dat$downsampled %in% "20x" & dat$coverage_interval %in% "[20,30)" ,8])
+
 ###---------------------###
 #    Make the Plot
 ###---------------------###

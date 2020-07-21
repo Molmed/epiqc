@@ -124,32 +124,83 @@ fwrite(anot[with(my.truseq, sums >= 4),], file="truseq_coords_catched.bed", sep=
 # EM-Seq 
 #missed:3254409
 #catched:15908511
+# M (no sex): 2745608
+# C (no sex): 15815797
+
 
 # MethylSeq
 #missed:3969935
 #catched:15741190
+# M (no sex)  3436146
+# C (no sex) 15624371
 
 # Splat
 #missed:5542927
 #catched:14139319
+# M (no sex) 4872534
+# C (no sex)  13987082
 
 #Truemethyl
 #missed:3124316
 #catched: 15801320
+# M (no sex) 2602647
+# C (no sex)15726064
 
 #TruSeq
 #missed:10157283
 #catched:12063788
+# M (no sex)  9225562
+# C (no sex)  11887961
+
+my.assays <- list(EMseq = my.emseq, 
+                  MethylSeq=my.methylseq,
+                  SPLAT = my.splat, 
+                  TrueMethyl= my.truemethyl, 
+                  TruSeq=my.truseq)
+
+my.row.names <- c("Missed_N_CpGs", 
+                  "Missed_Mean_GC_content_100bp", 
+                  "Missed_Mean_CpG_count_100bp", 
+                  "Missed_N_CpG_in_ATACpeaks", 
+                  "Missed_N_CpG_in_CpGIslands", 
+                  "Caught_N_CpGs", 
+                  "Caught_Mean_GC_content_100bp", 
+                  "Caught_Mean_CpG_count_100bp", 
+                  "Caught_N_CpG_in_ATACpeaks", 
+                  "Caught_N_CpG_in_CpGIslands")
+
+annotation.summary <- sapply(my.assays, function(x) {
+  tmp <- anot2[with(x, sums < 1),]
+  tmp2 <- anot2[with(x, sums > 3),]
+  c(dim(tmp)[1], 
+    tmp[, mean(gc_content)], 
+    tmp[, mean(cpg_count)], 
+    tmp[, sum(open_chromatin == "TRUE")],
+    tmp[, sum(cpg_island == "TRUE")], 
+    dim(tmp2)[1], 
+    tmp2[, mean(gc_content)], 
+    tmp2[, mean(cpg_count)], 
+    tmp2[, sum(open_chromatin == "TRUE")],
+    tmp2[, sum(cpg_island == "TRUE")])
+} )
 
 
+row.names(annotation.summary) <- my.row.names
 
-tmp <- anot2[with(my.truseq, sums < 1),]
+genome_wide <- c(dim(anot2)[1], 
+                anot2[, mean(gc_content)], 
+                anot2[, mean(cpg_count)], 
+                anot2[, sum(open_chromatin == "TRUE")],
+                anot2[, sum(cpg_island == "TRUE")], 
+                dim(anot2)[1], 
+                anot2[, mean(gc_content)], 
+                anot2[, mean(cpg_count)], 
+                anot2[, sum(open_chromatin == "TRUE")],
+                anot2[, sum(cpg_island == "TRUE")])
 
-
-
-
-
-
+write.table(cbind(annotation.summary, genome_wide), file= "/proj/uppstore2017167/EPIQC/Jess_annotations/assay_annotation_summary.txt",
+            quote=F, row.names=TRUE, sep= "\t")
+  
 # NEW Upsets for: Never caught, usually caught and always caught
 merged.dat <- data.table(emseq = select(my.emseq, sums), 
            methylseq= select(my.methylseq, sums),
