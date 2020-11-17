@@ -14,6 +14,7 @@ params.bwamem_genome = file('/mnt/galaxy/data/genome/grch38_full/bwa/GRCh38_full
 params.unconverted_fastqs_path = './*.R{1,2}.fastq.*'
 params.bedgraphs_path = './*.bedGraph.gz'
 params.aligner_cpus = 16
+path_to_convert_script = params.path_to_convert_script
 
 bedgraph_files = Channel.fromPath(params.bedgraphs_path)
 unconverted_fastq_files = Channel.fromFilePairs(params.unconverted_fastqs_path)
@@ -262,7 +263,7 @@ process insilico_convert {
     '''
     my_chrom=$(echo "!{chrom}" | tr -d \\n)
     grep -w ${my_chrom} !{bedgraph} > ${my_chrom}_bedgraph    
-    /mnt/home/mcampbell/20201001_epiqc/trial/convert_reads.py --bam !{bam} --bed ${my_chrom}_bedgraph --out !{bam}.converted.bam
+    !{path_to_convert_script}/convert_reads.py --bam !{bam} --bed ${my_chrom}_bedgraph --out !{bam}.converted.bam
     '''
 }
 
@@ -339,6 +340,7 @@ process methylDackel_mbias {
     cpus 8
     errorStrategy 'retry'
     conda "methyldackel=0.4.0 samtools=1.9"
+    publishDir "output", mode: 'copy'
 
     input:
         tuple file(md_file), file(md_bai) from aligned_for_mbias
@@ -390,6 +392,7 @@ process methylDackel_extract {
     cpus 8
     // publishDir "${default_dest_path}/${email}/${flowcell}${dest_modifier}", mode: 'copy'
     conda "methyldackel=0.4.0 pigz=2.4"
+    publishDir "output", mode: 'copy'
 
     input:
         tuple file(md_file), file(md_bai) from aligned_for_extract
