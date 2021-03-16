@@ -193,10 +193,10 @@ process bwamem_md {
     conda 'bwa=0.7.17 fastp=0.20.1 seqtk=1.3 samblaster=0.1.24 sambamba'
 
     input:
-        tuple val(library), file(reads) from unconverted_fastq_filessplitFasta(file: true, by: 10000000)
+        tuple val(library), file(reads) from unconverted_fastq_files.splitFasta(file: true, by: 10000000)
 
     output:
-        tuple library, file('*.sorted.bam'), file('*.sorted.bam.bai') into merge_bams
+        tuple file('*.sorted.bam'), file('*.sorted.bam.bai') into split_bams
 
     shell:
     '''
@@ -245,7 +245,7 @@ process bwamem_md {
 
 // }
 
-merged_bams.into{bwa_mem_contigs; bwa_mem_split}
+// merged_bams.into{bwa_mem_contigs; bwa_mem_split}
 
 // process capture_contigs {
 
@@ -265,7 +265,7 @@ merged_bams.into{bwa_mem_contigs; bwa_mem_split}
 
 // }
 
-contigs.splitText().set{chrom_list}
+// contigs.splitText().set{chrom_list}
 // chrom_list = ['chr1', 'chr2', 'chr3']
 
 // process split_bams {
@@ -293,34 +293,16 @@ process insilico_convert {
     input: 
         // tuple chrom, file(bam), file(bai) from split_bams
         // tuple cell_line, file(bedgraph) from combined_bedgraphs
-        tuple chrom, file(bam), file(bai), cell_line, file(bedgraph) from split_bams.combine(combined_bedgraphs)
+        tuple file(bam), file(bai), cell_line, file(bedgraph) from split_bams.combine(combined_bedgraphs)
 
     output:
-        tuple cell_line, chrom, file('*.converted.bam') into converted_bams
+        tuple cell_line, file('*.converted.bam') into converted_bams
 
     shell:
     '''
-    my_chrom=$(echo "!{chrom}" | tr -d \\n)
-    grep -w ${my_chrom} !{bedgraph} > ${my_chrom}_bedgraph    
-    !{path_to_convert_script}/convert_reads.py --bam !{bam} --bed ${my_chrom}_bedgraph --out !{cell_line}.${my_chrom}.converted.bam
+    identifier=$(basename $PWD)
+    !{path_to_convert_script}/convert_reads.py --bam !{bam} --bed !{bedgraph} --out !{cell_line}.${identifier}.converted.bam
     '''
-}
-
-process combine_sort_bams {
-    conda 'samtools'
-
-    input:
-        tuple cell_line, chrom, file(bam) from converted_bams.groupTuple()
-
-    output:
-        tuple cell_line, file('merged_converted.sorted.bam') into combined_bam
-
-    shell:
-    '''
-    samtools cat -o merged_converted.bam *.bam
-    samtools sort -n -T ./ -o merged_converted.sorted.bam merged_converted.bam
-    '''
-
 }
 
 process bam_to_fastq {
@@ -328,7 +310,7 @@ process bam_to_fastq {
     publishDir "output", mode: 'copy', pattern: '*.fastq.gz'
 
     input:
-        tuple cell_line, file(bam) from combined_bam
+        tuple cell_line, file(bam) from converted_bams
 
     output:
         tuple cell_line, file('*_read1.fastq.gz'), file('*_read2.fastq.gz') into fastq_for_bwameth
@@ -375,7 +357,24 @@ process bwameth_md {
     '''
 }
 
-bwameth_aligned_files.into{aligned_for_mbias; aligned_for_extract}
+process combine_sort_bams {
+    conda 'samtools'
+
+    input:
+        tuple cell_line, file(bam) from bwameth_aligned_files.groupTuple()
+
+    output:
+        tuple cell_line, file('merged_converted.sorted.bam') into combined_bams
+
+    shell:
+    '''
+    samtools cat -o merged_converted.bam *.bam
+    samtools sort -n -T ./ -o merged_converted.sorted.bam merged_converted.bam
+    '''
+
+}
+
+combined_bams.into{aligned_for_mbias; aligned_for_extract}
 
 process methylDackel_mbias {
     cpus 8
