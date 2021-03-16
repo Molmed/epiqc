@@ -11,7 +11,7 @@
 params.outdir = 'output'
 params.bwameth_genome = file('genome/grch38_core+bs_controls.fa').toAbsolutePath() //todo - move to zenodo?
 params.bwamem_genome = file('/mnt/galaxy/data/genome/grch38_full/bwa/GRCh38_full_analysis_set_plus_decoy_hla.fa').toAbsolutePath() //todo - move to zenodo?
-params.unconverted_fastqs_path = './*.R{1,2}.fastq.*'
+params.unconverted_fastqs_path = './*.{1,2}.fastq.gz'
 params.bedgraphs_path = './*.bedGraph.gz'
 params.aligner_cpus = 16
 path_to_convert_script = params.path_to_convert_script
@@ -89,7 +89,8 @@ process prepare_metadata_for_bedGraphs {
     for bg in `find "$(pwd)" -maxdepth 1 -name '*.bedGraph.gz'`; do
         dirname=`dirname $bg`
         cell_line=`echo $(basename $bg) | cut -f 2 -d _`
-        printf "${cell_line},${bg}\n" >> 'bedgraph_lib_info.csv'
+        context=`echo $(basename $bg) | cut -f 3 -d .`
+        printf "${cell_line},${context},${bg}\n" >> 'bedgraph_lib_info.csv'
     done
     '''
 }
@@ -99,14 +100,14 @@ bedgraph_info.splitCsv()
 
 
 // merge bedgraphs by cell line and recalculate % meth for all libs
-process merge_bedgraphs {
+process merge_bedgraphs_context {
     cpus 1
-    tag {cell_line}
+    tag {cell_line; context}
 
     input: 
-        tuple cell_line, file(bed) from library_bedgraphs.groupTuple()
+        tuple cell_line, context, file(bed) from library_bedgraphs.groupTuple(by: [0,1])
     output: 
-    file("combined_bedgraph") into combined_bedgraphs
+        tuple cell_line, file("combined_bedgraph_*") into combined_bedgraphs_context
 
     conda 'bedtools=2.29.2 pigz=2.3.4 parallel=20200722 sed=4.8'
 
@@ -127,9 +128,25 @@ process merge_bedgraphs {
                 }; 
                 avg_meth=meth/(meth+unmeth);
                 print $1,$2,$3,avg_meth,meth,unmeth
-            }' > combined_bedgraph
+            }' > combined_bedgraph_!{context}
 
     '''
+}
+
+process merge_bedgraphs {
+    cpus 1
+    tag {cell_line}
+
+    input:
+        tuple cell_line, file(bed) from combined_bedgraphs_context.groupTuple()
+    output:
+        tuple cell_line, file('combined_bedgraph') into combined_bedgraphs
+
+    shell:
+    '''
+        cat combined_bedgraph_* > combined_bedgraph
+    '''
+
 }
 
 // process prepare_metadata_for_fastqs {
@@ -171,15 +188,15 @@ process merge_bedgraphs {
 process bwamem_md {
     cpus params.aligner_cpus
     errorStrategy 'retry'
-    publishDir "output", mode: 'copy', pattern: '*.{sorted.bam}*'
+    tag {library}
 
     conda 'bwa=0.7.17 fastp=0.20.1 seqtk=1.3 samblaster=0.1.24 sambamba'
 
     input:
-        tuple val(library), file(reads) from unconverted_fastq_files
+        tuple val(library), file(reads) from unconverted_fastq_filessplitFasta(file: true, by: 10000000)
 
     output:
-        tuple file('*.sorted.bam'), file('*.sorted.bam.bai') into bwa_mem_aligned_files
+        tuple library, file('*.sorted.bam'), file('*.sorted.bam.bai') into merge_bams
 
     shell:
     '''
@@ -206,64 +223,86 @@ process bwamem_md {
 
 }
 
-bwa_mem_aligned_files.into{bwa_mem_contigs; bwa_mem_split}
+// process merge_bams {
+//     cpus 1
+//     publishDir "output", mode: 'copy', pattern: '*.{sorted.bam}*'
+//     conda 'samtools sambamba'
 
-process capture_contigs {
+//     input:
+//         file(files) from merge_bams.collect()
 
-    conda 'samtools'
+//     output:
+//         tuple file('*.sorted.bam'), file('*.sorted.bam.bai') into merged_bams
 
-    input:
-        tuple file(bam), file(bai) from bwa_mem_contigs
+//     shell:
+//     '''
+//     samtools cat *.bam > unconverted.merged.bam
+
+//     sambamba sort "unconverted.merged.bam"
+//     sambamba index *.sorted.bam
+
+//     '''
+
+// }
+
+merged_bams.into{bwa_mem_contigs; bwa_mem_split}
+
+// process capture_contigs {
+
+//     conda 'samtools'
+
+//     input:
+//         tuple file(bam), file(bai) from bwa_mem_contigs
     
-    output:
-        file('contigs.txt') into contigs
+//     output:
+//         file('contigs.txt') into contigs
 
-    shell:
-    '''
-    samtools view -H !{bam} | grep SN | grep -v HLA | grep -v chrUn \
-    | grep -v alt | grep -v random | cut -f 2 | cut -f 2 -d ":" > contigs.txt
-    '''
+//     shell:
+//     '''
+//     samtools view -H !{bam} | grep SN | grep -v HLA | grep -v chrUn \
+//     | grep -v alt | grep -v random | cut -f 2 | cut -f 2 -d ":" > contigs.txt
+//     '''
 
-}
+// }
 
 contigs.splitText().set{chrom_list}
 // chrom_list = ['chr1', 'chr2', 'chr3']
 
-process split_bams {
-    cpus 2
-    conda 'sambamba'
+// process split_bams {
+//     cpus 2
+//     conda 'sambamba'
 
-    input:
-        tuple file(bam), file(bai) from bwa_mem_split
-        each chrom from chrom_list
+//     input:
+//         tuple file(bam), file(bai) from bwa_mem_split
+//         each chrom from chrom_list
 
-    output:
-        tuple chrom, file('*.split.bam'), file('*.split.bam.bai') into split_bams
+//     output:
+//         tuple chrom, file('*.split.bam'), file('*.split.bam.bai') into split_bams
 
-    shell:
-    '''
-    my_chrom=$(echo "!{chrom}" | tr -d \\n)
-    sambamba view -h -f bam -t 2 -o "${my_chrom}.bwa.md.split.bam" *.sorted.bam ${my_chrom}
-    sambamba index "${my_chrom}.bwa.md.split.bam"
-    '''
-}
+//     shell:
+//     '''
+//     my_chrom=$(echo "!{chrom}" | tr -d \\n)
+//     sambamba view -h -f bam -t 2 -o "${my_chrom}.bwa.md.split.bam" *.sorted.bam ${my_chrom}
+//     sambamba index "${my_chrom}.bwa.md.split.bam"
+//     '''
+// }
 
 process insilico_convert {
-
     conda 'pysam'
 
     input: 
-        tuple chrom, file(bam), file(bai) from split_bams
-        each file(bedgraph) from combined_bedgraphs
-    
+        // tuple chrom, file(bam), file(bai) from split_bams
+        // tuple cell_line, file(bedgraph) from combined_bedgraphs
+        tuple chrom, file(bam), file(bai), cell_line, file(bedgraph) from split_bams.combine(combined_bedgraphs)
+
     output:
-        file('*.converted.bam') into converted_bams
+        tuple cell_line, chrom, file('*.converted.bam') into converted_bams
 
     shell:
     '''
     my_chrom=$(echo "!{chrom}" | tr -d \\n)
     grep -w ${my_chrom} !{bedgraph} > ${my_chrom}_bedgraph    
-    !{path_to_convert_script}/convert_reads.py --bam !{bam} --bed ${my_chrom}_bedgraph --out !{bam}.converted.bam
+    !{path_to_convert_script}/convert_reads.py --bam !{bam} --bed ${my_chrom}_bedgraph --out !{cell_line}.${my_chrom}.converted.bam
     '''
 }
 
@@ -271,10 +310,10 @@ process combine_sort_bams {
     conda 'samtools'
 
     input:
-        file(bam) from converted_bams.collect()
+        tuple cell_line, chrom, file(bam) from converted_bams.groupTuple()
 
     output:
-        file('merged_converted.sorted.bam') into combined_bam
+        tuple cell_line, file('merged_converted.sorted.bam') into combined_bam
 
     shell:
     '''
@@ -286,16 +325,17 @@ process combine_sort_bams {
 
 process bam_to_fastq {
     conda 'samtools'
+    publishDir "output", mode: 'copy', pattern: '*.fastq.gz'
 
     input:
-        file(bam) from combined_bam
+        tuple cell_line, file(bam) from combined_bam
 
     output:
-        tuple file('read1.fastq.gz'), file('read2.fastq.gz') into fastq_for_bwameth
+        tuple cell_line, file('*_read1.fastq.gz'), file('*_read2.fastq.gz') into fastq_for_bwameth
 
     shell:
     '''
-    samtools fastq -n -1 read1.fastq.gz -2 read2.fastq.gz !{bam}
+    samtools fastq -N -s singletons.fastq.gz -1 !{cell_line}_read1.fastq.gz -2 !{cell_line}_read2.fastq.gz !{bam}
     '''
 }
 
@@ -307,10 +347,10 @@ process bwameth_md {
     conda 'bwameth=0.2.2 fastp=0.20.1 seqtk=1.3 samblaster=0.1.24 sambamba'
 
     input:
-        tuple file(read1), file(read2) from fastq_for_bwameth
+        tuple cell_line, file(read1), file(read2) from fastq_for_bwameth
 
     output:
-        tuple file("*.bwameth.md.bam"), file("*.bwameth.md.bam.bai") into bwameth_aligned_files
+        tuple cell_line, file("*.bwameth.md.bam"), file("*.bwameth.md.bam.bai") into bwameth_aligned_files
 
     shell:
     '''
@@ -325,12 +365,13 @@ process bwameth_md {
 
     seqtk mergepe <(zcat -f !{read1}) <(zcat -f !{read2}) \
     | fastp --stdin --stdout -l 2 -Q ${trim_polyg} --interleaved_in --overrepresentation_analysis -j "combined_fastp.json" \
+    | sed 's|/1| 1:N:0:XXXXX|g' | sed 's|/2| 2:N:0:XXXXX|g'\
     | bwameth.py -p -t !{task.cpus} \
        --read-group  \"@RG\\\\tID:${fastq_barcode}\\\\tBC:${fastq_barcode}\\\\tCN:Multiple\\\\tPL:ILLUMINA\\\\tPU:${fastq_barcode}" \
-       --reference !{params.bwameth_genome} /dev/stdin 2>  "${fastq_barcode}.log.bwamem" \
+       --reference !{params.bwameth_genome} /dev/stdin 2>  "!{cell_line}.log.bwamem" \
     | samblaster 2> log.samblaster \
     | sambamba view -t 2 -l 0 -S -f bam /dev/stdin \
-    | sambamba sort --tmpdir=./ -t !{task.cpus} -m 20GB -o "${fastq_barcode}.bwameth.md.bam" /dev/stdin
+    | sambamba sort --tmpdir=./ -t !{task.cpus} -m 20GB -o "PCRfree_!{cell_line}.bwameth.md.bam" /dev/stdin
     '''
 }
 
@@ -343,11 +384,11 @@ process methylDackel_mbias {
     publishDir "output", mode: 'copy'
 
     input:
-        tuple file(md_file), file(md_bai) from aligned_for_mbias
+        tuple cell_line, file(md_file), file(md_bai) from aligned_for_mbias
 
     output:
-        file('*.svg') into mbias_output_svg
-        file('*.tsv') into mbias_output_tsv
+        tuple cell_line, file('*.svg') into mbias_output_svg
+        tuple cell_line, file('*.tsv') into mbias_output_tsv
 
     shell:
     '''
@@ -374,7 +415,7 @@ process methylDackel_mbias {
                 tail -n +2 | awk '{print $1"-"$2"-"$3"\t"$0}' | sort -k 1b,1
             ) \
             | sed "s/^/${chr}\t${context}\t/" \
-            >> UII_combined_mbias.tsv
+            >> PCRfree_!{cell_line}_combined_mbias.tsv
         done
     done
     # makes the svg files for trimming checks
@@ -395,14 +436,14 @@ process methylDackel_extract {
     publishDir "output", mode: 'copy'
 
     input:
-        tuple file(md_file), file(md_bai) from aligned_for_extract
+        tuple cell_line, file(md_file), file(md_bai) from aligned_for_extract
 
     output:
-        file('*.methylKit.gz') into extract_output
+        tuple cell_line, file('*.methylKit.gz') into extract_output
 
     shell:
     '''
-    MethylDackel extract --methylKit --OT 0,0,0,95 --OB 0,0,5,0 -@ !{task.cpus} --CHH --CHG -o UII !{params.bwameth_genome} !{md_file}
+    MethylDackel extract --methylKit --OT 0,0,0,95 --OB 0,0,5,0 -@ !{task.cpus} --CHH --CHG -o PCRfree_!{cell_line} !{params.bwameth_genome} !{md_file}
     pigz -p !{task.cpus} *.methylKit
     '''
 
