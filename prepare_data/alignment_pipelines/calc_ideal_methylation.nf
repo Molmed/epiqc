@@ -10,14 +10,14 @@
 
 params.outdir = 'output'
 params.bwameth_genome = file('genome/grch38_core+bs_controls.fa').toAbsolutePath() //todo - move to zenodo?
-params.bwamem_genome = file('/mnt/galaxy/data/genome/grch38_full/bwa/GRCh38_full_analysis_set_plus_decoy_hla.fa').toAbsolutePath() //todo - move to zenodo?
+params.bwamem_genome = file('/mnt/galaxy/data/genome/grch38_core+bs_controls/bwa_index/grch38_core+bs_controls/grch38_core+bs_controls.fa').toAbsolutePath() //todo - move to zenodo?
 params.unconverted_fastqs_path = './*.{1,2}.fastq.gz'
 params.bedgraphs_path = './*.bedGraph.gz'
-params.aligner_cpus = 16
+params.aligner_cpus = 5
 path_to_convert_script = params.path_to_convert_script
 
 bedgraph_files = Channel.fromPath(params.bedgraphs_path)
-unconverted_fastq_files = Channel.fromFilePairs(params.unconverted_fastqs_path)
+unconverted_fastq_files = Channel.fromFilePairs(params.unconverted_fastqs_path, flat: true)
 
 process cache_genome {
     publishDir file(params.bwameth_genome).parent
@@ -185,6 +185,23 @@ process merge_bedgraphs {
 //     .splitCsv(header: ['library', 'method', 'lab','cell_line', 'flowcell', 'read1', 'read2'])
 //     .set {fastq_for_bwamem}
 
+process split_fastqs {
+    cpus 2
+
+    input:
+        tuple library, file(read1), file(read2) from unconverted_fastq_files
+
+    output:
+        tuple file('*1.fastq.gz_*'), file('*2.fastq.gz_*') into split_fastqs
+    
+    shell:
+    '''
+    split <(zcat !{read1}) !{read1}_ -l 4000000 &
+    split <(zcat !{read2}) !{read2}_ -l 4000000
+    '''
+  
+}
+
 process bwamem_md {
     cpus params.aligner_cpus
     errorStrategy 'retry'
@@ -193,16 +210,17 @@ process bwamem_md {
     conda 'bwa=0.7.17 fastp=0.20.1 seqtk=1.3 samblaster=0.1.24 sambamba'
 
     input:
-        tuple val(library), file(reads) from unconverted_fastq_files.splitFasta(file: true, by: 10000000)
+        tuple file(read1), file(read2) from split_fastqs.transpose()
 
     output:
         tuple file('*.sorted.bam'), file('*.sorted.bam.bai') into split_bams
 
     shell:
     '''
-    inst_name=$(head -n 1 < <(zcat -f *1.fastq.gz) | cut -f 1 -d ':' | sed 's/^@//')
-    fastq_barcode=$(head -n 1 < <(zcat -f *1.fastq.gz) | sed -r 's/.*://')
-    flowcell=$(head -n 1 < <(zcat -f *1.fastq.gz) | cut -f 3 -d ':')
+    library=$(basename $PWD)
+    inst_name=$(head -n 1 < <(cat *1.fastq.gz*) | cut -f 1 -d ':' | sed 's/^@//')
+    fastq_barcode=$(head -n 1 < <(cat *1.fastq.gz*) | sed -r 's/.*://')
+    flowcell=$(head -n 1 < <(cat *1.fastq.gz*) | cut -f 3 -d ':')
     if [[ "${inst_name:0:2}" == 'A0' ]] || [[ "${inst_name:0:2}" == 'NS' ]] || [[ "${inst_name:0:2}" == 'NB' ]]; then
         #these 2-color instruments should have poly-g stretches trimmed since they are likely indicative of inactive clusters
         trim_polyg='--trim_poly_g'
@@ -210,126 +228,123 @@ process bwamem_md {
         trim_polyg=''
     fi
 
-    seqtk mergepe <(zcat -f *1.fastq.gz) <(zcat -f *2.fastq.gz) \
-    | fastp --stdin --stdout -l 2 -Q ${trim_polyg} --interleaved_in --overrepresentation_analysis -j "!{library}_combined_fastp.json" \
-    | bwa mem -p -t !{task.cpus} -R \"@RG\\\\tID:${fastq_barcode}\\\\tSM:!{library}\\\\tBC:${fastq_barcode}\\\\tCN:Multiple\\\\tPL:ILLUMINA\\\\tPU:${flowcell}-${fastq_barcode}" !{params.bwamem_genome} /dev/stdin 2>  "!{library}_${fastq_barcode}${flowcell}.log.bwamem" \
-    | samblaster 2> !{library}.log.samblaster \
-    | sambamba view -t 2 -S -f bam -o "!{library}_${fastq_barcode}.bwa.md.bam" /dev/stdin;
+    seqtk mergepe <(cat *1.fastq.gz*) <(cat *2.fastq.gz*) \
+    | fastp --stdin --stdout -l 2 -Q ${trim_polyg} --interleaved_in --overrepresentation_analysis -j "${library}_combined_fastp.json" \
+    | bwa mem -p -t !{task.cpus} -R \"@RG\\\\tID:${fastq_barcode}\\\\tSM:${library}\\\\tBC:${fastq_barcode}\\\\tCN:Multiple\\\\tPL:ILLUMINA\\\\tPU:${flowcell}-${fastq_barcode}" !{params.bwamem_genome} /dev/stdin 2>  "${library}_${fastq_barcode}${flowcell}.log.bwamem" \
+    | sambamba view -t 2 -S -f bam -o "${library}_${fastq_barcode}.bwa.md.bam" /dev/stdin;
 
-    sambamba sort "!{library}_${fastq_barcode}.bwa.md.bam"
+    sambamba sort *.md.bam
     sambamba index *.sorted.bam
+    '''
+
+}
+
+chrom_list = ['chr1', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX', 'chrY', 'chrM', 'chrEBV', 'phage_lambda', 'plasmid_puc19c', 'phage_T4', 'phage_Xp12']
+
+process split_bams {
+    cpus 2
+    conda 'sambamba'
+
+    input:
+        tuple file(bam), file(bai) from split_bams
+        each chrom from chrom_list
+
+    output:
+        tuple chrom, file('*.split.bam'), file('*.split.bam.bai') into chrom_split_bams
+
+    shell:
+    '''
+    my_chrom=$(echo "!{chrom}" | tr -d \\n)
+    sambamba view -h -f bam -t 2 -o "${my_chrom}.bwa.md.split.bam" *.sorted.bam ${my_chrom}
+    sambamba index "${my_chrom}.bwa.md.split.bam"
+    '''
+}
+
+process merge_bams {
+    cpus 1
+    publishDir "output", mode: 'copy', pattern: '*.{sorted.bam}*'
+    conda 'samtools sambamba'
+
+    input:
+        tuple chrom, file(bam) from chrom_split_bams.groupTuple()
+
+    output:
+        tuple chrom, file('*.unconverted.sorted.bam') into chrom_merged_bams
+
+    shell:
+    '''
+    my_chrom=$(echo "!{chrom}" | tr -d \\n)
+
+    samtools cat *.bam > ${my_chrom}.unconverted.cat.bam
+
+    sambamba sort -n ${my_chrom}.unconverted.sorted.bam
 
     '''
 
 }
 
-// process merge_bams {
-//     cpus 1
-//     publishDir "output", mode: 'copy', pattern: '*.{sorted.bam}*'
-//     conda 'samtools sambamba'
-
-//     input:
-//         file(files) from merge_bams.collect()
-
-//     output:
-//         tuple file('*.sorted.bam'), file('*.sorted.bam.bai') into merged_bams
-
-//     shell:
-//     '''
-//     samtools cat *.bam > unconverted.merged.bam
-
-//     sambamba sort "unconverted.merged.bam"
-//     sambamba index *.sorted.bam
-
-//     '''
-
-// }
-
 // merged_bams.into{bwa_mem_contigs; bwa_mem_split}
 
-// process capture_contigs {
-
-//     conda 'samtools'
-
-//     input:
-//         tuple file(bam), file(bai) from bwa_mem_contigs
-    
-//     output:
-//         file('contigs.txt') into contigs
-
-//     shell:
-//     '''
-//     samtools view -H !{bam} | grep SN | grep -v HLA | grep -v chrUn \
-//     | grep -v alt | grep -v random | cut -f 2 | cut -f 2 -d ":" > contigs.txt
-//     '''
-
-// }
-
-// contigs.splitText().set{chrom_list}
-// chrom_list = ['chr1', 'chr2', 'chr3']
-
-// process split_bams {
-//     cpus 2
-//     conda 'sambamba'
-
-//     input:
-//         tuple file(bam), file(bai) from bwa_mem_split
-//         each chrom from chrom_list
-
-//     output:
-//         tuple chrom, file('*.split.bam'), file('*.split.bam.bai') into split_bams
-
-//     shell:
-//     '''
-//     my_chrom=$(echo "!{chrom}" | tr -d \\n)
-//     sambamba view -h -f bam -t 2 -o "${my_chrom}.bwa.md.split.bam" *.sorted.bam ${my_chrom}
-//     sambamba index "${my_chrom}.bwa.md.split.bam"
-//     '''
-// }
 
 process insilico_convert {
-    conda 'pysam'
+    conda 'pysam samtools'
 
     input: 
-        // tuple chrom, file(bam), file(bai) from split_bams
-        // tuple cell_line, file(bedgraph) from combined_bedgraphs
-        tuple file(bam), file(bai), cell_line, file(bedgraph) from split_bams.combine(combined_bedgraphs)
+        tuple chrom, file(bam), cell_line, file(bedgraph) from chrom_merged_bams.combine(combined_bedgraphs)
 
     output:
-        tuple cell_line, file('*.converted.bam') into converted_bams
+        tuple cell_line, file('*.1.fastq.gz'), file('*.2.fastq.gz') into fastq_for_splitting
 
     shell:
     '''
     identifier=$(basename $PWD)
-    !{path_to_convert_script}/convert_reads.py --bam !{bam} --bed !{bedgraph} --out !{cell_line}.${identifier}.converted.bam
+    !{path_to_convert_script}/convert_reads.py --bam !{bam} --bed !{bedgraph} --out /dev/stdout \
+    | samtools fastq -N -s singletons.fastq.gz -1 !{chrom}.!{cell_line}.1.fastq.gz -2 !{chrom}.!{cell_line}.2.fastq.gz /dev/stdin
     '''
 }
 
-process bam_to_fastq {
-    conda 'samtools'
-    publishDir "output", mode: 'copy', pattern: '*.fastq.gz'
+process split_converted_fastqs {
+    cpus 2
 
     input:
-        tuple cell_line, file(bam) from converted_bams
+        tuple cell_line, file(read1), file(read2) from fastq_for_splitting.groupTuple()
 
     output:
-        tuple cell_line, file('*_read1.fastq.gz'), file('*_read2.fastq.gz') into fastq_for_bwameth
-
+        tuple cell_line, file('*.1.fastq.gz_*'), file('*.2.fastq.gz_*') into converted_split_fastqs
+    
     shell:
     '''
-    samtools fastq -N -s singletons.fastq.gz -1 !{cell_line}_read1.fastq.gz -2 !{cell_line}_read2.fastq.gz !{bam}
+    split <(zcat *1.fastq.gz_*) !{cell_line}.1.fastq.gz_ -l 40000000 &
+    split <(zcat *2.fastq.gz_*) !{cell_line}.2.fastq.gz_ -l 40000000
     '''
+  
 }
 
+// process bam_to_fastq {
+//     conda 'samtools'
+//     publishDir "output", mode: 'copy', pattern: '*.fastq.gz'
+
+//     input:
+//         tuple cell_line, file(bam) from converted_bams
+
+//     output:
+//         tuple cell_line, file('*_read1.fastq.gz'), file('*_read2.fastq.gz') into fastq_for_bwameth
+
+//     shell:
+//     '''
+//     samtools fastq -N -s singletons.fastq.gz -1 !{cell_line}_read1.fastq.gz -2 !{cell_line}_read2.fastq.gz !{bam}
+//     '''
+// }
+
 process bwameth_md {
-    cpus params.aligner_cpus
+    cpus 16
     // errorStrategy 'retry'
     publishDir "output", mode: 'copy', pattern: '*.{md.bam}*'
 
     conda 'bwameth=0.2.2 fastp=0.20.1 seqtk=1.3 samblaster=0.1.24 sambamba'
 
     input:
-        tuple cell_line, file(read1), file(read2) from fastq_for_bwameth
+        tuple cell_line, file(read1), file(read2) from fastq_for_bwameth.transpose()
 
     output:
         tuple cell_line, file("*.bwameth.md.bam"), file("*.bwameth.md.bam.bai") into bwameth_aligned_files
@@ -366,7 +381,7 @@ process combine_sort_bams {
     output:
         tuple cell_line, file('merged_converted.sorted.bam') into combined_bams
 
-    shell:
+    shell: //do merge instead
     '''
     samtools cat -o merged_converted.bam *.bam
     samtools sort -n -T ./ -o merged_converted.sorted.bam merged_converted.bam
