@@ -376,15 +376,14 @@ process combine_sort_bams {
     conda 'samtools'
 
     input:
-        tuple cell_line, file(bam) from bwameth_aligned_files.groupTuple()
+        tuple cell_line, file(bam), file(bai) from bwameth_aligned_files.groupTuple()
 
     output:
         tuple cell_line, file('merged_converted.sorted.bam') into combined_bams
 
     shell: //do merge instead
     '''
-    samtools cat -o merged_converted.bam *.bam
-    samtools sort -n -T ./ -o merged_converted.sorted.bam merged_converted.bam
+    samtools merge merged_converted.sorted.bam *.bam
     '''
 
 }
