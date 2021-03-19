@@ -254,9 +254,10 @@ process split_bams {
 
     shell:
     '''
+    identifier=$(basename $PWD)
     my_chrom=$(echo "!{chrom}" | tr -d \\n)
-    sambamba view -h -f bam -t 2 -o "${my_chrom}.bwa.md.split.bam" *.sorted.bam ${my_chrom}
-    sambamba index "${my_chrom}.bwa.md.split.bam"
+    sambamba view -h -f bam -t 2 -o "${my_chrom}.${identifier}.bwa.md.split.bam" *.sorted.bam ${my_chrom}
+    sambamba index "${my_chrom}.${identifier}.bwa.md.split.bam"
     '''
 }
 
@@ -310,7 +311,7 @@ process split_converted_fastqs {
         tuple cell_line, file(read1), file(read2) from fastq_for_splitting.groupTuple()
 
     output:
-        tuple cell_line, file('*.1.fastq.gz_*'), file('*.2.fastq.gz_*') into converted_split_fastqs
+        tuple cell_line, file('*.1.fastq.gz_*'), file('*.2.fastq.gz_*') into fastq_for_bwameth
     
     shell:
     '''
