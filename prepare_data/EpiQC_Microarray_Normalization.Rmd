@@ -1,0 +1,298 @@
+---
+title: "EpiQC Methylation Microarray Normalization"
+author: "Sam Lent"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    code_folding: hide 
+editor_options: 
+  chunk_output_type: console
+params: 
+  load.data: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '/path/to/epiqc/dir/')
+knitr::opts_chunk$set(echo = TRUE, eval=TRUE)
+library(minfi)
+library(ENmix)
+library(wateRmelon)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(corrplot)
+library(gplots)
+library(RColorBrewer)
+library(grid)
+library(gridExtra)
+library(scales)
+library(IlluminaHumanMethylationEPICmanifest)
+library(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
+data(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
+anno<-getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
+```
+
+## Data description 
+Data was generated at 3 labs. Each site ran 1-2 EPIC chips. 
+
+For the Lab A data, both chips contained 7 EpiQC samples (HG001-HG007) as well as either an unmethylated or methylated control in the 8th position. For the Lab B data, one EPIC chip contained 7 EpiQC samples (HG001-HG007) and an empty well in the 8th position. The 2 chips from Lab C contained 3 EpiQC samples (HG005, HG006, HG007) with 3 technical replicates each and 1 methylated control. The final dataset across all 3 labs contains 3 replicates each of HG001-HG004, 6 replicates each of HG005-HG007, 2 methylated controls, and 1 unmethylated control.
+
+## Sample QC 
+First, we check the identities of the samples by extracting the 59 SNPs on the EPIC array and calculating the correlation between SNP betas for every pair of samples. The heatmap below shows these correlations, with the color on the left side indicating which donor (of HG001-HG007 and Uppsala control) the sample is assigned to in the phenotype file. As expected, all within-subject correlations are very high, so we are confident that there were no sample swaps.
+
+
+```{r}
+samplesheet<-fread('./data/microarray/Samplesheet_AllLabs_EpiQCandControls.txt',data.table=F)
+rownames(samplesheet)<-samplesheet$Basename
+# Create extended RGChannelSet
+if (params$load.data==TRUE) {
+  load('./data/microarray/rgset.RData')
+} else {
+  rgset<-read.metharray.exp(targets=samplesheet,base='./data/microarray/idats',extended=T,verbose=F)
+  save(rgset,file='./data/microarray/rgset.RData')
+}
+
+snps<-getSnpBeta(rgset)
+snp.correlations<-cor(snps)
+
+samples.plot<-samplesheet$Basename[!is.na(samplesheet$SampleName.GIAB)]
+snp.correlations<-snp.correlations[samples.plot,samples.plot]
+
+samplecolors<-data.frame(SampleName.GIAB=paste0('HG00',1:7),color=c('#3aa142','#bdd7e7','#6baed6','#2171b5','#fcae91','#fb6a4a','#cb181d'),stringsAsFactors=F)
+samplesheet<-merge(samplesheet,samplecolors,all.x=TRUE,by='SampleName.GIAB')
+samplesheet$color[samplesheet$Type=='Methylated control']<-brewer.pal(12,'Paired')[10]
+samplesheet$color[samplesheet$Type=='Unmethylated control']<-brewer.pal(12,'Paired')[9]
+rownames(samplesheet)<-samplesheet$Basename
+heatmapcolors <- colorRampPalette(c("red","white","navy"))(n = 500)
+
+# All genotypes match up
+heatmap.2(snp.correlations,RowSideColors=samplesheet[rownames(snp.correlations),'color'], Rowv=TRUE, dendrogram='none',trace='none',col=heatmapcolors,margins=c(0.5,11), keysize=1.25,density.info='none',main='Correlations between SNP beta values for\nall GIAB samples, colored by cell line')
+
+```
+
+A plot of the unnormalized beta values shows that both methylated controls have higher beta values on average than the GIAB samples, and the unmethylated control has lower beta values on average. 
+```{r, fig.width=8,fig.height=6}
+# Check methylation distribution in all samples, no norm
+raw<-preprocessRaw(rgset)
+raw.beta.melt<-reshape2::melt(getBeta(raw))
+raw.beta.melt$Basename<-as.character(raw.beta.melt$Var2)
+raw.beta.melt$Type<-samplesheet[raw.beta.melt$Basename,'Type']
+raw.beta.melt$Lab<-samplesheet[raw.beta.melt$Basename,'Lab']
+raw.beta.melt$Color<-samplesheet[raw.beta.melt$Basename,'color']
+
+p<-ggplot(data=raw.beta.melt[!is.na(raw.beta.melt$value),]) + geom_boxplot(aes(x=Var2,y=value,fill=Color)) + theme_bw() + facet_grid(~Lab,scales='free_x',space='free_x') + scale_y_continuous(name='Beta values') + scale_fill_identity(breaks=c('#6A3D9A','#CAB2D6','#3aa142','#bdd7e7','#6baed6','#2171b5','#fcae91','#fb6a4a','#cb181d'),labels=c('Methylated control','Unmethylated control',paste0('HG00',1:7)),guide='legend',name='')  + theme(axis.text.x=element_text(angle=90),axis.title.x=element_blank(),legend.position='bottom')
+grid.arrange(p,top=textGrob('Raw data by sample, including methylated and unmethylated controls',gp=gpar(fontface='bold')))
+```
+
+
+## Normalization 
+Next, we normalize the data using several different methods. We divide methods into two rough categories: between-array normalization, meant to reduce technical differences between samples, annd within-array normalization, meant to adjust for the two different probe designs on the Illumina EPIC array. We normalized the data using every possible combination of between-array and within-array normalization.
+
+Between-array normalization methods: 
+
+* No normalization (preprocessRaw minfi function) 
+* Quantile normalization (pQuantile) ([Touleimat & Tost, 2012](https://www.futuremedicine.com/doi/10.2217/epi.12.21))
+* dasen ([Pidsley et al., 2013](https://bmcgenomics.biomedcentral.com/articles/10.1186/1471-2164-14-293))  
+* funnorm ([Fortin et al., 2014](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0503-2))
+* ENmix ([Xu et al., 2016](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4756845/))
+* SeSAMe ([Zhou et al., 2018](https://academic.oup.com/nar/article/46/20/e123/5061974))
+* Gaussian Quantile Mixture Normalization (GMQN) ([Xiong et al., 2020](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6943079/))
+
+Within-array normalization methods: 
+
+* No normalization  
+* Peak-based correction ([Dedeurwaerder et al., 2011](https://www.futuremedicine.com/doi/10.2217/epi.11.105?url_ver=Z39.88-2003&rfr_id=ori:rid:crossref.org&rfr_dat=cr_pub%3dwww.ncbi.nlm.nih.gov)) 
+* SWAN ([Maksimovic et al., 2012](https://genomebiology.biomedcentral.com/articles/10.1186/gb-2012-13-6-r44))
+* RCP ([Niu et al., 2016](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5013906/))  
+
+Two combinations were not possible due to incompatible object types: SeSAMe + SWAN and pQuantile + SWAN. Although the rcp() function provided in the ENmix packaage requires a MethylSet object as input, which would make it incompatible with some of our between-array normalization methods, the calculations are all performed on beta values, so we made an adapted function in this script for RCP normalization on beta values, betaRCP().
+
+The PC plots below show the first two PCs for each (centered and scaled) normalized dataset, including only the sites with complete information for all normalization methods to ensure a fair comparison, because some methods filter out low-quality sites as part of their QC. 
+
+```{r, fig.width=8, fig.height=11}
+##### Create functions #####
+# New RCP function to use betas as input
+betaRCP<-function (beta.matrix, dist = 25, quantile.grid = seq(0.001, 0.999, by = 0.001), qcscore = NULL, nbthre = 3, detPthre = 1e-06) {
+    raw.M <- B2M(beta.matrix)
+    annotation = getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
+    annotation = annotation[as.vector(annotation$Name) %in% rownames(beta.matrix), 
+        ]
+    probe.II.Name = annotation$Name[annotation$Type == "II"]
+    annotation = annotation[order(annotation$chr, annotation$pos), 
+        ]
+    anno1 = annotation[1:(nrow(annotation) - 1), ]
+    anno2 = annotation[2:nrow(annotation), ]
+    flag = (abs(anno1$pos - anno2$pos) < dist & anno1$chr == 
+        anno2$chr & anno1$Relation_to_Island == anno2$Relation_to_Island & 
+        anno1$Type != anno2$Type)
+    anno1 = anno1[flag, ]
+    anno2 = anno2[flag, ]
+    probe.I = anno1$Name
+    probe.II = anno2$Name
+    probe.I[anno2$Type == "I"] = anno2$Name[anno2$Type == "I"]
+    probe.II[anno1$Type == "II"] = anno1$Name[anno1$Type == "II"]
+    raw.M.t = raw.M[c(probe.I, probe.II), ]
+    if (is.null(qcscore)) {
+    }
+    else if ((sum(!(rownames(raw.M.t) %in% rownames(qcscore$detP))) + 
+        sum(!(colnames(raw.M.t) %in% colnames(qcscore$detP)))) > 
+        0) {
+        stop("Wrong qcscore matrix, please check...\n")
+    }
+    else {
+        temp <- qcscore$nbead < nbthre | qcscore$detP > detPthre
+        temp = temp[rownames(raw.M.t), ]
+        temp = temp[, colnames(raw.M.t)]
+        raw.M.t[temp] = NA
+    }
+    M.II <- raw.M.t[probe.II, ]
+    M.I <- raw.M.t[probe.I, ]
+    qtl <- function(x) quantile(x, quantile.grid, na.rm = TRUE)
+    M.I = apply(M.I, 2, qtl)
+    M.II = apply(M.II, 2, qtl)
+    beta.est <- mat.or.vec(2, ncol(beta.matrix))
+    for (i in 1:ncol(beta.matrix)) {
+        index <- (M.II[, i] != Inf & M.II[, i] != -Inf & M.I[, 
+            i] != Inf & M.I[, i] != -Inf)
+        X <- cbind(rep(1, sum(index)), M.II[index, i])
+        Y <- M.I[index, i]
+        beta.est[, i] <- solve(t(X) %*% X) %*% t(X) %*% Y
+    }
+    M.II.all <- raw.M[probe.II.Name, ]
+    M.II.new <- mat.or.vec(nrow(M.II.all), ncol(M.II.all))
+    for (i in 1:ncol(M.II.all)) {
+        M.II.new[, i] <- beta.est[1, i] + beta.est[2, i] * M.II.all[, 
+            i]
+    }
+    M.II.new[M.II.all == Inf] <- Inf
+    M.II.new[M.II.all == -Inf] <- (-Inf)
+    beta.matrix[probe.II.Name, ] <- M2B(M.II.new)
+    beta.matrix
+}
+
+#### Normalize data #####
+if (params$load.data==TRUE) {
+  load('./data/microarray/NormalizedDataSets.RData')
+} else {
+  # Remove methylated/unmethylated control before normalization
+  epiqc.samples<-samplesheet$Basename[samplesheet$Type=='EpiQC']
+  rgset<-rgset[,epiqc.samples]
+  # Creat matrix for each combination of between array normalization (None,
+  # SeSAMe, dasen, ENmix,)
+  # Dataset naming scheme: BetweenArrayNorm.WithinArrayNorm.beta
+  ##### Apply between-array normalization #####
+  # None
+  raw<-preprocessRaw(rgset)
+  # Pfilter for all methods that take MethylSets as input
+  mset.pfilter<-pfilter(rgset)
+  none.none.beta<-getBeta(raw)
+  pquantile.norm<-preprocessQuantile(mset.pfilter)
+  pquantile.none.beta<-getBeta(pquantile.norm)
+  dasen.norm<-dasen(mset.pfilter,ret2=TRUE)
+  dasen.none.beta<-getBeta(dasen.norm)
+  qc<-QCinfo(rgset,distplot=FALSE)
+  enmix.norm<-preprocessENmix(rgset, bgParaEst="oob", dyeCorr="RELIC", QCinfo=qc, nCores=6)
+  enmix.none.beta<-getBeta(enmix.norm)
+  funnorm.norm<-preprocessFunnorm(rgset,ratioConvert=FALSE)
+  funnorm.none.beta<-getBeta(funnorm.norm)
+  ssets<-RGChannelSetToSigSets(rgset)
+  sesame.none.beta<-do.call(cbind,lapply(ssets,function(sigset) {openSesame(sigset)}))
+  # SeSAMe sets individual observations to NA, remove sites where all individuals were set to NA
+  sesame.all.na<-which(rowSums(is.na(sesame.none.beta))==ncol(sesame.none.beta))
+  sesame.none.beta<-sesame.none.beta[!(rownames(sesame.none.beta) %in% names(sesame.all.na)),]
+  # Note: must load ChAMP after running dasen, because dasen calls a minfi function which is also 
+  # used in one of the packages ChAMP depends on, so dasen defaults to the wrong namespace
+  m<-data.frame(getMeth(mset.pfilter))
+  um<-data.frame(getUnmeth(mset.pfilter))
+  # Using default reference (GSE105018)
+  gmqn.none.beta<-gmqn_parallel(m, um, type='850k',ncpu = 20)
+  gmqn.none.beta<-as.matrix(gmqn.none.beta)
+  colnames(gmqn.none.beta)<-gsub('X','',colnames(gmqn.none.beta))
+  gmqn.all.na<-which(rowSums(is.na(gmqn.none.beta))==ncol(gmqn.none.beta))
+  gmqn.none.beta<-gmqn.none.beta[!(rownames(gmqn.none.beta) %in% names(gmqn.all.na)),]
+  
+  ##### Apply within-array normalizations #####
+  ### RCP ###
+  none.rcp.beta<-rcp(raw)
+  pquantile.rcp.beta<-betaRCP
+  funnorm.rcp.beta<-betaRCP(funnorm.none.beta)
+  enmix.rcp.beta<-rcp(enmix.norm,qcscore=qc)
+  dasen.rcp.beta<-rcp(dasen.norm)
+  sesame.rcp.beta<-betaRCP(sesame.none.beta)
+  gmqn.rcp.beta<-betaRCP(gmqn.none.beta)
+  
+  ### SWAN ###
+  none.swan.beta<-getBeta(preprocessSWAN(rgset,mSet=mset.pfilter))
+  funnorm.swan.beta<-getBeta(preprocessSWAN(rgset,mSet=funnorm.norm))
+  dasen.swan.beta<-getBeta(preprocessSWAN(rgset,mSet=dasen.norm))
+  enmix.swan.beta<-getBeta(preprocessSWAN(rgset,mSet=enmix.norm))
+  gmqn.swan.beta<-gmqn_swan_parallel(m, um, type='850k',ncpu = 6)
+  gmqn.swan.beta<-as.matrix(gmqn.swan.beta)
+  colnames(gmqn.swan.beta)<-gsub('X','',colnames(gmqn.swan.beta))
+  gmqn.all.na<-which(rowSums(is.na(gmqn.swan.beta))==ncol(gmqn.swan.beta))
+  gmqn.swan.beta<-gmqn.swan.beta[!(rownames(gmqn.swan.beta) %in% names(gmqn.all.na)),]
+  
+  ### PBC ###
+  # Note: must load ChAMP after running dasen, because dasen calls a minfi function which is also
+  # used in one of the packages ChAMP depends on, so dasen defaults to the wrong namespace
+  library(ChAMP)
+  none.pbc.beta<-champ.norm(beta=none.none.beta,method='PBC',arraytype='EPIC')
+  pquantile.pbc.beta<-champ.norm(beta=pquantile.none.beta,method='PBC',arraytype='EPIC')
+  funnorm.pbc.beta<-champ.norm(beta=funnorm.none.beta,method='PBC',arraytype='EPIC')
+  enmix.pbc.beta<-champ.norm(beta=enmix.none.beta,method='PBC',arraytype='EPIC')
+  dasen.pbc.beta<-champ.norm(beta=dasen.none.beta,method='PBC',arraytype='EPIC')
+  sesame.pbc.beta<-champ.norm(beta=sesame.none.beta,method='PBC',arraytype='EPIC')
+  gmqn.pbc.beta<-champ.norm(beta=gmqn.none.beta,method='PBC',arraytype='EPIC')
+  
+  # Make vector of all possible between array/within array method combinations
+  objnames<-paste0(apply(expand.grid(c('none','pquantile','funnorm','enmix','dasen','sesame','gmqn'),c('none','swan','pbc','rcp')),1,paste0,collapse='.'),'.beta')
+  # Remove objects that don't exist because we could not run 
+  # them (pQuantile/SWAN and seSAMe/SWAN)
+  objnames<-objnames[sapply(objnames,exists)]
+  save(list=objnames,file='./data/microarray/NormalizedDataSets.RData')
+}
+
+# Find CpG sites with complete information in every normalized dataset for PCA
+# Some norm methods remove low-quality sites, so we want to ensure a fair 
+# comparison when comparing clustering by cell line 
+objnames<-paste0(apply(expand.grid(c('none','pquantile','funnorm','enmix','dasen','sesame','gmqn'),c('none','swan','pbc','rcp')),1,paste0,collapse='.'),'.beta')
+# Remove objects that don't exist because we could not run 
+# them (pQuantile/SWAN and seSAMe/SWAN)
+objnames<-objnames[sapply(objnames,exists)]
+shared.sites<-Reduce(intersect,lapply(objnames,function(x) {return(rownames(get(x)[complete.cases(get(x)),]))}))
+# length(shared.sites)
+# [1] 678597
+# 678,597 sites present in all microarray datasets, write out to file
+write.table(shared.sites,file='./data/microarray/SharedSites_AllNormalizedDatasets_NoMissingData.txt',quote=F,col.names=F,row.names=F)
+
+# Perform PCA on common CpG sites 
+pcs<-NULL
+for (obj in objnames) {
+  tmp<-get(obj)
+  tmp<-tmp[shared.sites,]
+  pc.rot<-prcomp(tmp,center=TRUE,scale.=TRUE)$rotation
+  pc.rot<-data.frame(pc.rot)
+  pc.rot$BetweenArrayNorm<-gsub('(.*)\\.(.*)\\.beta','\\1',obj)
+  pc.rot$WithinArrayNorm<-gsub('(.*)\\.(.*)\\.beta','\\2',obj)
+  pc.rot$SampleName.GIAB<-samplesheet[rownames(pc.rot),'SampleName.GIAB']
+  pc.rot$color<-samplesheet[rownames(pc.rot),'color']
+  pcs<-rbind(pcs,pc.rot)
+}
+
+# Reformat normalization methods for plot 
+pcs$WithinArrayNorm<-factor(pcs$WithinArrayNorm,levels=c('none','pbc','swan','rcp'),labels=c('None','PBC','SWAN','RCP'))
+pcs$BetweenArrayNorm<-factor(pcs$BetweenArrayNorm,levels=c('none','pquantile','dasen','funnorm','enmix','sesame','gmqn'),labels=c('None','pQuantile','dasen','funnorm','ENmix','SeSAMe','GMQN'))
+pcs$NormMethod<-factor(paste(pcs$BetweenArrayNorm,pcs$WithinArrayNorm,sep=' + '),levels=apply(expand.grid(c('None','PBC','SWAN','RCP'), c('None','pQuantile','dasen','funnorm','ENmix','SeSAMe','GMQN')),1,function(x) {paste(x[2],x[1],sep=' + ')}))
+
+ann_text <- data.frame(x = rep(-0.18,2),y = rep(-0.05,2), NormMethod=factor(c('pQuantile + SWAN','SeSAMe + SWAN'),levels=levels(pcs$NormMethod)))
+
+ggplot(data=pcs) + geom_point(aes(x=PC1,y=PC2,fill=color),shape=24,stroke=0.4,size=2.5) +  theme_bw() + facet_wrap(~NormMethod,scales='free',ncol=4) + scale_fill_identity(name='Cell line',guide='legend',breaks=samplecolors$color,labels=samplecolors$SampleName.GIAB) + theme(panel.spacing.x = unit(0.5, "lines"),axis.text=element_text(size=5),legend.position='bottom',legend.text=element_text(size=12),legend.title=element_text(size=13,hjust=0.5),strip.text=element_text(size=9)) + geom_text(data = ann_text,aes(x=x,y=y),label = "Incompatible\nmethods") + scale_x_continuous(labels = scales::number_format(accuracy = 0.01),expand=c(0.001,0.001)) + scale_y_continuous(labels = scales::number_format(accuracy = 0.01),expand=c(0.1,0.1)) + guides(fill=guide_legend(ncol=7))
+```
+
+## R Session Info
+```{r}
+sessionInfo()
+```
