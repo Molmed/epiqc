@@ -40,7 +40,7 @@ fi
 ### deduplicate BAM
 if [ ! -f ${outdir}/${sample}.sorted.md.bam ]; then
   rsync -av ${outdir}/${sample}.sorted.bam* $TMPDIR
-  java -jar -Xmx12G /athena/masonlab/scratch/users/jfoox/programs/picard.jar MarkDuplicates \
+  java -jar -Xmx12G picard.jar MarkDuplicates \
       I=${sample}.sorted.bam \
       O=${sample}.sorted.md.bam \
       CREATE_INDEX=true \
