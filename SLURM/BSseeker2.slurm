@@ -11,7 +11,8 @@ echo [`date`] "Started job"
 outdir=seqc2/epiqc/bsseeker2/outs
 refdir=seqc2/epiqc/bsseeker2/grch38_core_and_bs_controls.fa_bowtie2
 ref=seqc2/epiqc/grch38_core_bs_controls/grch38_core_and_bs_controls.fa
-samplesheet=$1
+
+samplesheet=$1  # a file with the absolute path to one fastq (R1) per line
 R1path=$(cat $samplesheet | sed -n "${SLURM_ARRAY_TASK_ID}p")
 R2path=${R1path/.R1/.R2}
 R1=$(basename $R1path)
