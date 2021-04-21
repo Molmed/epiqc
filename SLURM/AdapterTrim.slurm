@@ -10,7 +10,7 @@ conda activate bwameth
 echo [`date`] "Started job"
 
 ### metadata and refs
-outdir=/athena/masonlab/scratch/projects/seqc2/epiqc/revision/data_adaptertrimmed/outs
+outdir=seqc2/epiqc/data_adaptertrimmed/outs
 samplesheet=$1
 R1path=$(cat $samplesheet | sed -n "${SLURM_ARRAY_TASK_ID}p")
 R2path=${R1path/.R1/.R2}
