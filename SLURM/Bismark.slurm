@@ -9,7 +9,7 @@ echo [`date`] 'Started job'
 
 ### metadata and refs
 outdir=seqc2/epiqc/bismark/outs
-samplesheet=$1
+samplesheet=$1  # a file with the absolute path to one fastq (R1) per line
 R1path=$(cat $samplesheet | sed -n "${SLURM_ARRAY_TASK_ID}p")
 R2path=${R1path/.R1/.R2}
 R1=$(basename $R1path)
