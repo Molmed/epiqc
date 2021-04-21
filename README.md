@@ -3,7 +3,7 @@
 Scripts for data processing, analysis and visualization of EpiQC methylation data. 
 
 
-# SLURM scripts
+### SLURM scripts
 
 Scripts to be run on HPC (submitted to scheduler using SLURM). This folder includes scripts for:
 * adapter trimming
