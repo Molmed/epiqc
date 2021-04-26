@@ -15,7 +15,7 @@ Scripts to be run on HPC (submitted to scheduler using SLURM). This folder inclu
 ### Rmds
 
 R Markdown files that produce figures from analysis outputs. This includes:
-* *Mapping.R*: generate figures for mapping efficiency and CpG detection
+* **Mapping.R**: generate figures for mapping efficiency and CpG detection
 * CpG_Coverage.R to generate figures for genome-wide CpG coverage and genomic annotation
 * CpG_Methylation.R to generate figures for global methylation percent estimations
 * AlogComp.R to generate figures for comparing the outputs from each methylation analysis pipeline
