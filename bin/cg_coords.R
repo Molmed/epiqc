@@ -1,3 +1,5 @@
+# Strand and replicate merging, bsseq liftover to epic array and downsampling of bsseq bedgraphs
+
 library(BSgenome.Hsapiens.UCSC.hg38)
 
 args <- commandArgs(trailingOnly=T)
