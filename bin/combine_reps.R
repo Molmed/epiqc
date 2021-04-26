@@ -1,3 +1,5 @@
+# Merge replicates, using total count of cytosines across dinucleotide as coverage measure
+
 library(data.table)
 
 
