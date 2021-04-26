@@ -12,3 +12,16 @@ Scripts to be run on HPC (submitted to scheduler using SLURM). This folder inclu
 * merging replicates into one bedGraph per library (e.g. combining bedGraphs from MethylSeq HG001 replicates 1 and 2)
 * creating a timing comparison across all pipelines
 
+### Rmds
+
+R Markdown files that produce figures from analysis outputs. This includes:
+* Mapping.R to generate figures for mapping efficiency and CpG detection
+* CpG_Coverage.R to generate figures for genome-wide CpG coverage and genomic annotation
+* CpG_Methylation.R to generate figures for global methylation percent estimations
+* AlogComp.R to generate figures for comparing the outputs from each methylation analysis pipeline
+
+### bin
+Scripts to transform outputs in preparation for figure generation. This includes:
+* combine_methylation_outputs.py to merge signal from multiple bedGraphs (leveraged in mergeReplicates.slurm)
+* combine_methylBedGraphs.py to merge signal from 5mC data in methylBedGraph format (created by e.g. Megalodon)
+* bsseeker2_to_bedGraph.py to pull CpG data frm BSseeker2 outputs and store in bedGraph format
